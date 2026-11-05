@@ -1,0 +1,34 @@
+# Ticker universe from the Nasdaq Trader symbol directory.
+# Current listings only: survivorship bias is accepted and documented.
+sources:
+  nasdaqlisted: https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt
+  otherlisted: https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt
+  sp500_wikipedia: https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
+
+# otherlisted.txt exchange codes: N = NYSE, A = NYSE American, P = NYSE Arca,
+# Z = Cboe BZX, V = IEX, M = NYSE Texas/Chicago, F = TXSE. Nasdaq listings are always kept.
+keep_exchanges: ["N", "A"]
+# Listings on any other venue are kept only if not an ETF and the name matches this
+# (e.g. CBOE on BZX, companies whose primary listing moved to TXSE).
+other_venue_keep_pattern: '\bcommon (stock|shares|units)\b|\bordinary shares\b'
+
+# CQS symbols mark special issues with a lowercase suffix: p = preferred, r = rights,
+# w = when-issued. Any lowercase letter drops the listing.
+cqs_lowercase_reasons: {p: preferred_symbol, r: right, w: when_issued}
+
+# Applied to the security name (case-insensitive regex), in this order; the first match
+# is recorded as the drop reason.
+drop_name_patterns:
+  warrant: '\bwarrants?\b'
+  right: '\brights?\b'
+  # SPAC units, corporate units; keeps MLP "Common Units ..." and royalty-trust "Units of Beneficial Interest"
+  unit: '(?<!common )\bunits?\b(?! of beneficial)(?!,? representing)'
+  preferred: '\bpreferred\b|\bpreference (shares?|securities)\b|\bpfd\b'
+  note_debenture: '\bnotes?\b|\bdebentures?\b|\bdue \d{4}\b|\bdue [a-z]+ \d{1,2}, \d{4}\b|\bcapital securities\b|\btr(ust)? (ctfs?|certificates?)\b|\bcorp backed\b'
+  closed_end_fund: '\bfunds?\b|\bterm trust\b|\bincome trust\b|\bmunicipal\b|\bstrats\b|(blackrock|nuveen|eaton vance|gabelli|abrdn|aberdeen|pimco|cohen & steers|franklin|templeton|invesco|calamos|john hancock|western asset|flaherty|duff & phelps|tortoise|kayne anderson|clearbridge|virtus|allspring|mfs|putnam|saba|liberty all-star|royce|tekla|doubleline|neuberger|pgim|first trust|lord abbett|nuveen)\b.*\b(trust|income|investors|opportunit\w*|portfolio|strateg\w*)\b'
+
+# Names matching this are never dropped by drop_name_patterns (operating REITs).
+never_drop_name_pattern: '\brealty trust\b|\bREIT\b'
+
+adr_pattern: '\bADRs?\b|\bADSs?\b|American Deposit[ao]ry|\bN\.?Y\.? Registry\b|New York Registry'
+spac_pattern: '\bacquisition (corp|corporation|company|co)\b|\bspac\b|\bmerger corp\b'

@@ -1,0 +1,209 @@
+# B2: pattern detectors (scripts/detect_patterns.py). All windows in trading days (rows).
+# Price ratios are fractions (0.15 = 15%). Every gate can be switched off with null.
+paths:
+  prices: data/clean/prices.parquet
+  features: artifacts/features          # rows.parquet (eligibility, guards), market.parquet (VIX)
+  out_dir: artifacts/patterns
+  report: reports/B2_patterns.md
+  figures: reports/figures/B2_patterns
+  gallery: reports/gallery
+  labels: data/labels/human_checks.csv
+  log_file: logs/detect_patterns.log
+
+pivots:
+  atr: 14
+  k: 5                         # k-bar swing highs (cup lips): usable from bar i + k
+  zigzag_atr: [2.0, 3.0, 4.5]  # zigzag reversal = mult x ATR14 (H&S pivots), one run per scale
+
+cup_handle:
+  prior_window: 252            # prior uptrend: left lip high / min low of the previous 252 days - 1
+  prior_rise_min: 0.15         # loose gate (classic >= 30%); the value is kept as a feature
+  lip_high_window: 126         # left lip near the top of the previous 6 months:
+  lip_high_tol: 0.05           #   left lip / highest high of the previous 126 days - 1 >= -0.05
+  cup_days: [35, 325]          # 7-65 weeks, left lip -> right lip
+  cup_depth: [0.12, 0.25]      # (left lip - cup low) / left lip. 0.33 -> 0.25 with the user 2026-10-26
+                               #   (hand labels: 25-33% deep 6% valid, > 33% 0/16 valid)
+  cup_depth_max_high_vix: null # high-VIX depth allowance: off (was 0.50); deep cups -> deep_cup
+  deep_cup_max: 0.50           # cups deeper than cup_depth[1] up to this -> separate pattern deep_cup
+  high_vix_pct: 0.80           # (feature cup_low_vix_pct: VIX 1y percentile near the cup low)
+  high_vix_window: 10          #   "near" = within +-10 trading days of the cup low (inside the cup)
+  lip_diff: [-0.15, 0.05]      # right lip / left lip - 1
+  bottom_frac_min: 0.20        # share of cup closes in the lower third of the cup (U vs V)
+  # pivot checks added with the user 2026-10-26 (labeling findings)
+  lip_recovery_min: 0.80       # right lip regains >= 80% of the cup depth: (R - cup low) / (L - cup low)
+  cup_low_vs_trend_min: 0.0    # cup low above the start of the prior uptrend (lowest low of prior_window)
+  spike_lips_max: 0            # no lip on a spike bar (range > spike_atr ATR) or gap bar (open > gap_atr ATR away)
+  spike_atr: 3.0
+  gap_atr: 1.0
+  handle_days: [7, 25]         # right lip -> trigger day (5 would only be the lip's k-bar confirmation)
+  handle_depth_max: 0.15       # (pivot - handle low) / pivot
+  handle_pos_max: 0.50         # (right lip - handle low) / (right lip - cup low): upper half of the cup
+  handle_slope_max: null       # linear-fit slope of handle closes, fraction per day (feature only)
+  near_pivot: 0.05             # forming: close within 5% below the pivot
+  volume_base: 50              # volume ratios relative to the mean of the previous 50 days
+
+head_shoulders:                # shared by the top (short) and the inverse (long, mirrored)
+  prior_window: 252            # prior trend into the left shoulder
+  prior_trend_min: 0.15        # loose gate (classic >= 30%); kept as a feature
+  head_extreme_window: 126     # head near the extreme of the previous 6 months (top: highest
+  head_extreme_tol: 0.03       #   high, inverse: lowest low), within 3%
+  head_prominence_min: 0.03    # head beyond the more extreme shoulder
+  head_prominence_atr_min: 1.0 # same distance in ATR14 at the head: a separate peak, not noise
+  head_prominence_close_atr_min: 1.0 # same on closes (most extreme close within +-close_halfwidth
+  close_halfwidth: 2           #   bars of each pivot, not past t): rejects single-bar wick pivots
+  shoulder_diff_max: 0.10      # |LS - RS| / more extreme shoulder
+  shoulder_diff_hh_max: 0.50   # |LS - RS| / head height above the neckline
+  shoulder_height: [0.30, 0.95] # shoulder distance from the neckline / head distance (both shoulders)
+  time_sym: [0.5, 2.0]         # (RS - H) / (H - LS) in days
+  neck_slope_max: 0.50         # |neckline change from LS to RS| / head height
+  span_days: [15, 260]         # LS -> RS
+  expiry_ratio: 3.0            # pattern dropped when (t - H) > expiry_ratio x (H - LS) without trigger
+  near_neckline: 0.04          # forming: close within 4% of the neckline (not yet through it)
+  volume_base: 50
+  volume_halfwidth: 3          # volume at a shoulder/head = mean over +-3 days (not past t)
+  # pivot checks added with the user 2026-10-26 (labeling findings: shoulders 1-2 bars from T1/T2)
+  min_leg_atr: 1.5             # each leg LS-T1, T1-H, H-T2, T2-RS >= 1.5 ATR14 (at the head)
+  min_spacing: 3               # neighbouring pivots >= 3 bars apart (user 2026-10-26: 5 rejected 13/26 valid labels)
+  spike_pivots_max: null       # not gated (user 2026-10-26: cost 6/26 valid labels); spike_pivots stays a feature
+  spike_atr: 3.0
+  gap_atr: 1.0
+
+# Consolidation breakout at highs and ascending triangle. Shared pivot / scan settings; the gates
+# are per pattern below.
+consolidation:
+  k: 3                         # swing highs / lows: 3-bar pivots, usable from bar i + 3
+  min_spacing: 5               # touches >= 5 bars apart
+  spike_atr: 3.0               # spike bars (range > 3 ATR14) are never pivots
+  gap_atr: 1.0                 # gap bars (open > 1 ATR14 from the previous close) are never pivots
+  wick_cap_atr: 0.5            # touch level = min(high, body top + 0.5 ATR): a lone wick sets no line
+  touch_tol_atr: 1.0           # touches = swing highs within 1 ATR of the resistance (flatness gate below)
+  max_days: 160                # scan at most 160 days after the first touch (duration gate below)
+  depth_cap: 0.35              # instance ends when a low is > 35% below the resistance
+  near_atr: 1.0                # forming: close within 1 ATR below the resistance
+  prior_window: 252            # prior trend into the first touch
+  high_window: 126             # resistance vs the highest high of the 6 months before the first touch
+  tight_days: 10               # tightness: range of the last 10 days / base height
+  volume_base: 50
+  forming_tries: 10            # forming-stage gate checks per instance (speed)
+
+consolidation_breakout:
+  prior_rise_min: 0.15         # loose gate (classic >= 30%); kept as a feature
+  res_vs_high_min: -0.05       # resistance within 5% of the 6-month high
+  touches_min: 2
+  flatness_max_atr: 0.5        # touch levels within 0.5 ATR
+  duration: [15, 126]          # first touch -> day: >= 3 weeks, <= 6 months
+  depth_max: 0.25              # deeper is a cup / correction
+  height_min_atr: 2.0
+  height_max_atr: 6.0          # deeper in ATR = V-shaped correction (labels round 4: valid <= 4.7 ATR)
+  lows_trend_min_atr: -1.0     # last - first swing low >= -1 ATR (not clearly falling)
+  closes_out_max: 0            # closes above the resistance before the trigger
+
+ascending_triangle:
+  touches_min: 2
+  lows_min: 2                  # rising swing lows on the support
+  flatness_max_atr: 0.5
+  lows_rise_min_atr: 0.5       # each swing low >= 0.5 ATR above the previous
+  height_min_atr: 2.0          # resistance - first swing low
+  duration: [18, 126]          # labels round 4: valid triangles 24-40 days
+  breakout_pos_max: 0.85       # classic 2/3-3/4 of the way to the apex (labels round 4: valid <= 0.73)
+  closes_out_max: 0            # closes above the top / below the support before the trigger
+  # optional gate: reject an upside break when the highest high of the `window` sessions before it
+  # lies in the path (> close + clear_atr ATR and < target), e.g. {window: 252, clear_atr: 0.5}.
+  # Off: such setups are flagged instead (overhead columns, caution in the screener).
+  overhead_gate: null
+
+# Looser thresholds for drawing the hand-labeling sample (borderline cases on purpose).
+# Merged over the sections above.
+labeling:
+  cup_handle:
+    prior_rise_min: 0.0
+    lip_high_tol: null
+    cup_days: [25, 400]
+    cup_depth: [0.08, 0.60]      # = the high-VIX max: loose depth no longer depends on VIX
+    cup_depth_max_high_vix: 0.60
+    deep_cup_max: null           # loose: every depth stays a cup_handle candidate (labeling sample)
+    lip_diff: [-0.25, 0.10]
+    bottom_frac_min: 0.0
+    handle_days: [3, 40]
+    handle_depth_max: 0.25
+    handle_pos_max: 0.75
+    near_pivot: 0.08
+    lip_recovery_min: null       # new pivot checks: not gated in the labeling build (sample unchanged)
+    cup_low_vs_trend_min: null
+    spike_lips_max: null
+  head_shoulders:
+    prior_trend_min: 0.0
+    head_extreme_tol: null
+    head_prominence_min: 0.01
+    head_prominence_atr_min: 0.5
+    head_prominence_close_atr_min: null  # not gated: keeps the labeling sample unchanged
+    shoulder_diff_max: 0.20
+    shoulder_diff_hh_max: 1.0
+    shoulder_height: [0.15, 1.0]
+    time_sym: [0.33, 3.0]
+    neck_slope_max: 1.0
+    span_days: [10, 320]
+    expiry_ratio: 4.0
+    near_neckline: 0.06
+    min_leg_atr: null            # new pivot checks: not gated in the labeling build
+    min_spacing: null
+    spike_pivots_max: null
+  consolidation_breakout:
+    prior_rise_min: 0.0
+    res_vs_high_min: -0.15
+    flatness_max_atr: 1.0
+    duration: [8, 160]
+    depth_max: 0.35
+    height_min_atr: 1.5
+    height_max_atr: null
+    lows_trend_min_atr: null
+    closes_out_max: 2
+  ascending_triangle:
+    flatness_max_atr: 1.0
+    lows_rise_min_atr: 0.2
+    height_min_atr: 1.5
+    duration: [8, 160]
+    breakout_pos_max: 1.3
+    overhead_gate: null
+    closes_out_max: 2
+
+sample:                        # hand-labeling sample (pre-holdout events only)
+  seed: 7
+  end: "2023-12-31"            # never sample from the locked holdout
+  per_cell: 50                 # 3 patterns x 2 stages x 50 = 300
+  borderline_share: 0.5        # share per cell that fails >= 1 default gate
+  context_days: 120            # chart shows this many days before the pattern start
+  top_up:                      # extra events appended after the drawn sample (keeps sample_ids)
+    - {pattern: cup_handle, stage: forming, borderline: false, n: 25}  # cell was 96% borderline
+    # round 3: fresh events to test candidate rules found on labels #102-325
+    # cup lip recovery = (right lip - cup low) / (left lip - cup low) = 1 + lip_diff / cup_depth
+    - {pattern: cup_handle, stage: forming, borderline: false, n: 4, query: "-0.5 <= lip_diff / cup_depth < -0.3"}
+    - {pattern: cup_handle, stage: forming, borderline: false, n: 4, query: "-0.3 <= lip_diff / cup_depth <= -0.15"}
+    # bars from the right-shoulder pivot to the detection day
+    - {pattern: hs_top, stage: triggered, borderline: false, n: 2, query: "row - p5_row <= 2"}
+    - {pattern: hs_top, stage: triggered, borderline: false, n: 2, query: "row - p5_row >= 5"}
+    - {pattern: inv_hs, stage: triggered, borderline: false, n: 1, query: "row - p5_row <= 2"}
+    - {pattern: inv_hs, stage: triggered, borderline: false, n: 1, query: "row - p5_row >= 5"}
+    # round 4 (2026-10-26): new types consolidation_breakout / ascending_triangle, <= 72 events
+    # seeds: inverse H&S charts labeled not_a_reversal, detected again as a consolidation (+-60 days)
+    - {pattern: consolidation_breakout, n: 8, seed_from: {pattern: inv_hs, reason: not_a_reversal, window_days: 60}}
+    - {pattern: consolidation_breakout, stage: triggered, borderline: false, n: 12}
+    - {pattern: consolidation_breakout, stage: triggered, borderline: true, n: 12}
+    - {pattern: consolidation_breakout, stage: forming, borderline: false, n: 5}
+    - {pattern: consolidation_breakout, stage: forming, borderline: true, n: 5}
+    - {pattern: ascending_triangle, stage: triggered, borderline: false, n: 8, query: "direction == 1"}
+    - {pattern: ascending_triangle, stage: triggered, borderline: false, n: 2, query: "direction == -1"}
+    - {pattern: ascending_triangle, stage: triggered, borderline: true, n: 8, query: "direction == 1"}
+    - {pattern: ascending_triangle, stage: triggered, borderline: true, n: 2, query: "direction == -1"}
+    - {pattern: ascending_triangle, stage: forming, borderline: false, n: 5}
+    - {pattern: ascending_triangle, stage: forming, borderline: true, n: 5}
+
+gallery:
+  seed: 11
+  n_per_pattern: 50
+  end: "2023-06-30"            # trigger date; the 'after' window must stay out of the holdout
+  after_days: 60
+
+build:
+  workers: 16
+  report_start: "1995-01-01"

@@ -1,0 +1,39 @@
+# Data validation (A3) and cleaning policy for data/clean.
+paths:
+  raw_prices: data/raw/prices
+  raw_benchmarks: data/raw/benchmarks
+  universe: data/meta/universe.parquet
+  out_dir: artifacts/validation          # per-ticker summary + events (intermediate)
+  exclusions: data/meta/exclusions.parquet
+  report: reports/data_validation.md
+  figures: reports/figures/data_validation
+  log_file: logs/validate.log
+
+checks:
+  calendar_check_start: "1962-01-01"   # NYSE traded Saturdays until 1952; Yahoo has none
+  ohlc_tolerance: 0.001                # relative slack for high >= max(open, close) etc.
+  gap_flag_sessions: 10                # missing NYSE sessions between two rows -> event
+  big_return: 0.5                      # |close-to-close return| above this -> event
+  split_match_tol: 0.05                # |log adj ret - log split ratio| for split_not_applied
+  revert_tol: 0.2                      # |log r_t + log r_t+1| below this -> spike_revert
+  volume_window: 20                    # rows before / after for volume and dollar-volume medians
+  adj_jump_tol: 0.02                   # |log change of adj_factor| without a dividend -> event
+  stale_run_days: 10                   # identical close with zero volume for this many rows
+  bad_print_max_volume_ratio: 1.5      # spike_revert on volume below this x 50-day median -> bad print
+  large_dividend_ratio: 0.5            # dividend > this x previous close -> check it
+  dividend_min_drop_ratio: 0.6         # ex-date drop (prev close - open) / dividend below this -> corrupt
+  min_adj_factor: 0.001                # adj_factor before the dividend at or below this -> corrupt
+  # an event is "relevant" if the stock is roughly tradable within impact_window rows after it
+  loose_min_price: 5.0                 # close_raw
+  loose_min_dollar_volume: 5.0e+6      # 50-day mean of close_raw x volume_raw
+  impact_window: 504                   # ~2 years: longest feature + pattern-formation lookback
+
+# Cleaning policy -> data/meta/exclusions.parquet (applied by scripts/build_clean.py; exclusion
+# spans stay in data/clean and are masked out of eligibility in the feature build).
+cleaning:
+  min_rows: 300                        # fewer rows after cleaning -> drop the ticker
+  # level artifacts (adjusted series jumps by a constant factor): exclude rows around the jump
+  span_kinds: [split_not_applied, bad_dividend, bad_print]
+  span_rows_before: 61                 # max label horizon (60) + entry day: no label crosses the jump
+  span_rows_after: 630                 # longest feature / pattern-formation lookback (~2.5 years)
+  stale_runs: exclude                  # halt-like stretches (flat close, zero volume) -> exclusion span

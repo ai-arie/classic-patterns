@@ -1,0 +1,64 @@
+# Price / benchmark / macro download settings.
+paths:
+  raw_prices: data/raw/prices
+  raw_benchmarks: data/raw/benchmarks
+  raw_macro: data/raw/macro
+  state_file: data/raw/download_state.json
+  log_file: logs/download.log
+  universe: data/meta/universe.parquet
+  update_state_file: data/raw/update_state.json
+  update_log_file: logs/update.log
+  universe_changes: data/meta/universe_changes.parquet
+
+yfinance:
+  period: max
+  interval: 1d
+  threads: false
+
+# Deliberately gentle: ~224 batches x (~17 s fetch + ~22 s sleep) ~= 2.5 h for the full universe.
+batch_size: 25
+sleep_seconds: [15, 30]         # uniform random sleep between batches
+backoff_minutes: [2, 4, 8, 16, 32]
+max_consecutive_failures: 5     # stop cleanly after this many failed attempts in a row
+
+# scripts/update_daily.py (screener app only; training uses the frozen full download)
+update:
+  period: 1mo                # recent window fetched per stored ticker
+  min_overlap_days: 3        # fewer stored days inside the window -> full re-download
+  rtol: 1.0e-4               # overlap tolerance on close / y_close; beyond it -> full re-download
+  # a full re-download replaces the stored history only if it is not truncated (Yahoo may return
+  # just the last days after a delisting): starts at most this many days later, has this share of rows
+  redownload_max_start_shift_days: 31
+  redownload_min_rows_frac: 0.9
+  settle_minutes: 60         # a session counts as complete this long after the NYSE close
+  universe_refresh_days: 7
+
+benchmarks: ["^GSPC", "^NDX", "^IXIC", "^RUT", "^VIX", "^VIX3M", "SPY", "QQQ", "IWM"]
+
+fred:
+  url: https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}
+  series:
+    T10Y2Y: {optional: false}
+    BAMLH0A0HYM2: {optional: true}   # HY OAS; history may be truncated by ICE licensing
+
+test_tickers:
+  - AAPL    # 4:1 split 2020-08-31
+  - NVDA    # 10:1 split 2024-06-10
+  - BRK-B   # class share symbol
+  - KO      # long dividend history
+  - MSFT
+  - JPM
+  - XOM
+  - TSLA    # 5:1 (2020) and 3:1 (2022) splits
+  - GOOGL   # 20:1 split 2022-07-18
+  - AMZN    # 20:1 split 2022-06-06
+  - ARM     # recent IPO (2023-09)
+  - CAVA    # recent IPO (2023-06)
+  - GE      # 1:8 reverse split 2021-08-02
+  - C       # 1:10 reverse split 2011-05-09
+  - SIRI    # 1:10 reverse split 2024-09-10
+  - CALM    # small/mid cap
+  - SPY
+  - "^GSPC"
+  - "^VIX"
+  - "^VIX3M"

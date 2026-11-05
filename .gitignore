@@ -1,0 +1,22 @@
+# data and run outputs (download scripts are shipped instead of data)
+/data/
+/artifacts/
+/models/
+/mlruns/
+/logs/
+/reports/
+*.parquet
+
+# environments, caches, temp
+.venv/
+.cache/
+.tmp/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.DS_Store
+
+# local settings
+.env
